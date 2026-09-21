@@ -1,0 +1,251 @@
+import { el, formatJPY, formatNumber, showToast, latestSnapshotPerBroker } from '../util.js';
+import { fetchDailySeries } from '../prices.js';
+import { describeApiError } from '../api.js';
+import { BENCHMARKS, buildValueSeries, benchmarkSeries, computeReturns, normalizeFrom } from '../performance.js';
+
+let chart = null;
+let benchmarkCode = BENCHMARKS[0].code;
+let chartPeriod = 'ytd';       // 'mtd' | 'ytd' | '1y'
+let chartTarget = 'total';     // 'total' | brokerId
+let loading = false;
+
+const REFRESH_MS = 30 * 60 * 1000;
+
+export function renderPerformance(container, state, refresh) {
+  container.innerHTML = '';
+  container.appendChild(el('h1', {}, '成績（前日比・月初来・年初来）'));
+
+  if (state.snapshots.length === 0) {
+    container.appendChild(el('div', { class: 'card empty-state' }, [
+      el('div', { class: 'big' }, '📈'),
+      el('p', {}, 'まだ保有データがありません。「CSV取込」または「手入力」で保有銘柄を登録してください。'),
+    ]));
+    return;
+  }
+
+  const codes = neededCodes(state);
+  const cache = state.dailySeries;
+  const stale = !cache || Date.now() - cache.fetchedAt > REFRESH_MS || codes.some((c) => !(c in cache.results));
+  if (stale && !loading) {
+    loading = true;
+    container.appendChild(el('div', { class: 'card' }, el('p', { class: 'hint' }, '日次の株価データを取得しています…（銘柄数によって数秒かかります）')));
+    fetchDailySeries(codes, '2y').then((res) => {
+      loading = false;
+      state.dailySeries = { fetchedAt: Date.now(), results: { ...(cache ? cache.results : {}), ...res.results }, error: res.error };
+      renderPerformance(container, state, refresh);
+    });
+    return;
+  }
+  if (loading) {
+    container.appendChild(el('div', { class: 'card' }, el('p', { class: 'hint' }, '日次の株価データを取得しています…')));
+    return;
+  }
+
+  if (cache.error) {
+    container.appendChild(el('div', { class: 'card section-gap', style: 'border-color:var(--danger)' }, [
+      el('h2', {}, '⚠ 株価データを取得できません'),
+      el('p', { class: 'hint' }, describeApiError(cache.error)),
+      el('button', { class: 'btn btn-sm', onclick: () => { state.dailySeries = null; renderPerformance(container, state, refresh); } }, '再試行'),
+    ]));
+    return;
+  }
+
+  const series = buildValueSeries({ snapshots: state.snapshots, tickers: state.tickers, dailySeries: cache.results });
+  if (series.dates.length < 2) {
+    container.appendChild(el('div', { class: 'card section-gap' }, [
+      el('h2', {}, '日次データのある銘柄がありません'),
+      el('p', { class: 'hint' }, '成績の計算には株価を取得できる銘柄（証券コード付き）が必要です。「株価」画面で証券コードを設定するか、「手入力」でコードを入力してください。投資信託のみの場合は日々の値動きを追えません。'),
+    ]));
+    return;
+  }
+
+  const bench = benchmarkSeries(series.dates, cache.results, benchmarkCode);
+  const benchMeta = BENCHMARKS.find((b) => b.code === benchmarkCode);
+  const totalRet = computeReturns(series.dates, series.total);
+  const benchRet = bench ? computeReturns(series.dates, bench) : null;
+
+  container.appendChild(renderControls(container, state, refresh, benchMeta));
+  container.appendChild(renderSummaryCards(totalRet, benchRet, benchMeta));
+  container.appendChild(renderChartCard(series, bench, benchMeta, state));
+  container.appendChild(renderAccountTable(series, totalRet, benchRet, benchMeta, state));
+  container.appendChild(el('p', { class: 'hint' },
+    `対象期間: ${series.dates[0]} 〜 ${series.dates[series.dates.length - 1]}（${series.dates.length}営業日）。` +
+    `現在の保有数量で各日の終値から評価した値です。株価を取得できる銘柄 ${series.liveItems}件が日々変動し、` +
+    (series.staticItems ? `投資信託など ${series.staticItems}件は取込時の評価額で固定しています。` : '') +
+    `${benchMeta.short}との比較はどちらも期間開始日を100とした指数で表示しています。`
+  ));
+}
+
+function neededCodes(state) {
+  const tickerByName = new Map(state.tickers.map((t) => [t.name, t.code]));
+  const codes = new Set([benchmarkCode]);
+  for (const snap of latestSnapshotPerBroker(state.snapshots)) {
+    for (const item of snap.items) {
+      const code = tickerByName.get(item.name);
+      if (code) codes.add(code);
+      if (item.currency && item.currency !== 'JPY') codes.add(`${item.currency}JPY=X`);
+    }
+  }
+  return [...codes];
+}
+
+function renderControls(container, state, refresh, benchMeta) {
+  const benchSelect = el('select', {}, BENCHMARKS.map((b) => el('option', { value: b.code, selected: b.code === benchmarkCode ? 'selected' : null }, b.label)));
+  benchSelect.addEventListener('change', () => { benchmarkCode = benchSelect.value; renderPerformance(container, state, refresh); });
+  const reloadBtn = el('button', {
+    class: 'btn btn-sm',
+    onclick: () => { state.dailySeries = null; renderPerformance(container, state, refresh); showToast('株価データを再取得します'); },
+  }, '🔄 再取得');
+  return el('div', { class: 'card section-gap inline-flex', style: 'justify-content:space-between' }, [
+    el('div', { class: 'inline-flex' }, [el('label', { class: 'hint' }, '比較する基準'), benchSelect]),
+    reloadBtn,
+  ]);
+}
+
+function signed(n, digits = 2) {
+  if (n == null || Number.isNaN(n)) return '-';
+  return (n >= 0 ? '+' : '−') + formatNumber(Math.abs(n), digits);
+}
+function signedJPY(n) {
+  if (n == null || Number.isNaN(n)) return '-';
+  return (n >= 0 ? '+' : '−') + formatJPY(Math.abs(n));
+}
+function tone(n) {
+  return n == null ? '' : n >= 0 ? 'up' : 'down';
+}
+
+function renderSummaryCards(totalRet, benchRet, benchMeta) {
+  const grid = el('div', { class: 'card-grid' });
+  const periods = [
+    { key: 'day', label: '前日比' },
+    { key: 'mtd', label: '月初来' },
+    { key: 'ytd', label: '年初来' },
+  ];
+  for (const p of periods) {
+    const r = totalRet[p.key];
+    const b = benchRet ? benchRet[p.key] : null;
+    const diff = r && b ? r.pct - b.pct : null;
+    grid.appendChild(el('div', { class: 'card stat-card' }, [
+      el('div', { class: 'stat-label' }, p.label + (r && r.partial ? `（${r.baseDate}比）` : '')),
+      el('div', { class: 'stat-value ' + tone(r && r.pct) }, r ? `${signed(r.pct)}%` : '-'),
+      el('div', { class: 'stat-sub ' + tone(r && r.abs) }, r ? signedJPY(r.abs) : 'データ不足'),
+      el('div', { class: 'stat-sub' }, b
+        ? `${benchMeta.short} ${signed(b.pct)}%　差 ${signed(diff)}pt`
+        : `${benchMeta.short}: データなし`),
+    ]));
+  }
+  grid.appendChild(el('div', { class: 'card stat-card' }, [
+    el('div', { class: 'stat-label' }, '現在の評価額（日次計算）'),
+    el('div', { class: 'stat-value' }, formatJPY(totalRet.last)),
+    el('div', { class: 'stat-sub' }, `${totalRet.lastDate} 終値時点`),
+  ]));
+  return grid;
+}
+
+function renderChartCard(series, bench, benchMeta, state) {
+  const brokerById = new Map(state.brokers.map((b) => [b.id, b]));
+  const targetSelect = el('select', {}, [
+    el('option', { value: 'total', selected: chartTarget === 'total' ? 'selected' : null }, '資産全体'),
+    ...Object.keys(series.byBroker).map((id) => el('option', { value: id, selected: chartTarget === id ? 'selected' : null }, brokerById.get(id)?.name || '?')),
+  ]);
+  const periodSelect = el('select', {}, [
+    el('option', { value: 'mtd', selected: chartPeriod === 'mtd' ? 'selected' : null }, '月初来'),
+    el('option', { value: 'ytd', selected: chartPeriod === 'ytd' ? 'selected' : null }, '年初来'),
+    el('option', { value: '1y', selected: chartPeriod === '1y' ? 'selected' : null }, '1年'),
+  ]);
+  const canvas = el('canvas', { id: 'performance-chart' });
+  const card = el('div', { class: 'card chart-card section-gap', style: 'height:360px' }, [
+    el('div', { class: 'inline-flex', style: 'justify-content:space-between;margin-bottom:8px;' }, [
+      el('h2', { style: 'margin:0' }, `${benchMeta.short}との値動き比較（期間開始＝100）`),
+      el('div', { class: 'inline-flex' }, [targetSelect, periodSelect]),
+    ]),
+    canvas,
+  ]);
+
+  const draw = () => {
+    const values = chartTarget === 'total' ? series.total : (series.byBroker[chartTarget] || series.total);
+    const ret = computeReturns(series.dates, values);
+    const lastDate = series.dates[series.dates.length - 1];
+    let fromDate;
+    if (chartPeriod === 'mtd') fromDate = ret.mtd ? ret.mtd.baseDate : series.dates[0];
+    else if (chartPeriod === 'ytd') fromDate = ret.ytd ? ret.ytd.baseDate : series.dates[0];
+    else {
+      const d = new Date(lastDate + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() - 1);
+      fromDate = d.toISOString().slice(0, 10);
+    }
+    const mine = normalizeFrom(series.dates, values, fromDate);
+    const theirs = bench ? normalizeFrom(series.dates, bench, fromDate) : [];
+    const labels = mine.map((p) => p.date);
+    const label = chartTarget === 'total' ? '資産全体' : (brokerById.get(chartTarget)?.name || '口座');
+    if (chart) chart.destroy();
+    chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label, data: mine.map((p) => p.value), borderColor: '#2f6fed', backgroundColor: 'rgba(47,111,237,0.10)', fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2 },
+          { label: benchMeta.short, data: theirs.map((p) => p.value), borderColor: '#9aa0ac', borderDash: [6, 4], fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y, 2)}（${signed(ctx.parsed.y - 100)}%）` } },
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+          y: { ticks: { callback: (v) => formatNumber(v, 0) } },
+        },
+      },
+    });
+  };
+  targetSelect.addEventListener('change', () => { chartTarget = targetSelect.value; draw(); });
+  periodSelect.addEventListener('change', () => { chartPeriod = periodSelect.value; draw(); });
+  requestAnimationFrame(draw);
+  return card;
+}
+
+function renderAccountTable(series, totalRet, benchRet, benchMeta, state) {
+  const brokerById = new Map(state.brokers.map((b) => [b.id, b]));
+  const cellFor = (r) => {
+    if (!r) return el('td', { class: 'num' }, '-');
+    return el('td', { class: 'num ' + tone(r.pct) }, [
+      el('span', { class: 'pair' }, `${signed(r.pct)}%`),
+      el('span', { class: 'pair' }, signedJPY(r.abs)),
+    ]);
+  };
+  const rows = Object.entries(series.byBroker).map(([id, values]) => {
+    const ret = computeReturns(series.dates, values);
+    const broker = brokerById.get(id);
+    return el('tr', {}, [
+      el('td', { class: 'wrap' }, [el('span', { class: 'broker-dot', style: `background:${broker ? broker.color : '#999'}` }), broker ? broker.name : '(削除済み)']),
+      el('td', { class: 'num' }, formatJPY(ret.last)),
+      cellFor(ret.day), cellFor(ret.mtd), cellFor(ret.ytd),
+    ]);
+  });
+  rows.push(el('tr', { style: 'font-weight:700;border-top:2px solid var(--border)' }, [
+    el('td', {}, '合計'),
+    el('td', { class: 'num' }, formatJPY(totalRet.last)),
+    cellFor(totalRet.day), cellFor(totalRet.mtd), cellFor(totalRet.ytd),
+  ]));
+  if (benchRet) {
+    const pctOnly = (r) => el('td', { class: 'num ' + tone(r && r.pct) }, r ? `${signed(r.pct)}%` : '-');
+    rows.push(el('tr', { class: 'text-muted' }, [
+      el('td', {}, `${benchMeta.short}（基準）`),
+      el('td', { class: 'num' }, '-'),
+      pctOnly(benchRet.day), pctOnly(benchRet.mtd), pctOnly(benchRet.ytd),
+    ]));
+  }
+  return el('div', { class: 'card section-gap' }, [
+    el('h2', {}, '口座別の成績'),
+    el('table', { class: 'table-compact' }, [
+      el('thead', {}, el('tr', {}, [
+        el('th', {}, '口座'), el('th', { class: 'num' }, '評価額'),
+        el('th', { class: 'num' }, '前日比'), el('th', { class: 'num' }, '月初来'), el('th', { class: 'num' }, '年初来'),
+      ])),
+      el('tbody', {}, rows),
+    ]),
+  ]);
+}

@@ -1,6 +1,7 @@
 import { DB } from './db.js';
 import { initSync, pullFromServer, isDirty } from './sync.js';
 import { isCloudMode } from './api.js';
+import { labelTableCells } from './util.js';
 import { buildDefaultBrokers } from './defaultBrokers.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderPerformance } from './views/performance.js';
@@ -14,7 +15,7 @@ import { renderBackup } from './views/backup.js';
 
 // Shown in the sidebar so "did the update apply?" has a one-glance answer. Keep in step with
 // CACHE_NAME in sw.js.
-const APP_VERSION = '15';
+const APP_VERSION = '17';
 
 const state = { brokers: [], snapshots: [], dividends: [], tickers: [], livePrices: {}, fxRates: {}, dividendInfo: {}, dailySeries: null };
 let currentView = 'dashboard';
@@ -78,9 +79,23 @@ function switchView(view) {
   renderCurrentView();
 }
 
+const sidebar = document.querySelector('.sidebar');
 document.querySelectorAll('.nav-item').forEach((btn) => {
-  btn.addEventListener('click', () => switchView(btn.dataset.view));
+  btn.addEventListener('click', () => { switchView(btn.dataset.view); sidebar.classList.remove('open'); });
 });
+
+// --- phone layout helpers ---
+// Hamburger menu: on narrow screens the nav is hidden behind a button instead of scrolling.
+const navToggle = document.getElementById('nav-toggle');
+if (navToggle) navToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+// Any data table that appears in the content area gets per-cell labels so the phone stylesheet
+// can lay it out as stacked cards. Raw CSV previews (class raw-grid) are left as real grids.
+const labelNewTables = () => {
+  document.querySelectorAll('.content table:not(.raw-grid):not([data-labeled="1"])').forEach(labelTableCells);
+};
+// (runs synchronously — requestAnimationFrame can be paused for background tabs)
+new MutationObserver(labelNewTables).observe(document.querySelector('.content'), { childList: true, subtree: true });
 
 // --- PWA install + offline support ---
 if ('serviceWorker' in navigator) {

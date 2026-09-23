@@ -58,13 +58,34 @@ export async function fetchFxRates(currencies) {
   return rates;
 }
 
+// A Korean code is listed on either KOSPI (.KS) or KOSDAQ (.KQ). Yahoo doesn't 404 for the
+// wrong one — it returns a MUTUALFUND placeholder with a meaningless price — so both are
+// queried and the one that is a real equity/ETF wins. Without instrument info (an older
+// back end) the guess is kept as-is.
+async function resolveKoreanTickers(guessed) {
+  const korean = guessed.filter((t) => /^\d{6}\.KS$/.test(t.code));
+  if (korean.length === 0) return guessed;
+  const candidates = korean.flatMap((t) => [t.code, t.code.replace(/\.KS$/, '.KQ')]);
+  const quotes = await fetchQuotes(candidates);
+  const isListed = (q) => q && !q.error && q.price != null && (!q.instrumentType || ['EQUITY', 'ETF'].includes(q.instrumentType));
+  return guessed.map((t) => {
+    if (!/^\d{6}\.KS$/.test(t.code)) return t;
+    const ks = quotes[t.code];
+    const kq = quotes[t.code.replace(/\.KS$/, '.KQ')];
+    if (isListed(ks)) return t;
+    if (isListed(kq)) return { ...t, code: t.code.replace(/\.KS$/, '.KQ') };
+    return t;
+  });
+}
+
 // Ensures every holding name that has a guessed ticker code has a `tickers` DB row, without
 // clobbering codes the user already edited by hand. Returns the up-to-date ticker list.
 export async function ensureTickersRegistered(newlyGuessed) {
   const existing = await DB.getAllTickers();
   const existingNames = new Set(existing.map((t) => t.name));
-  for (const t of newlyGuessed) {
-    if (!t.code || existingNames.has(t.name)) continue;
+  const fresh = newlyGuessed.filter((t) => t.code && !existingNames.has(t.name));
+  const resolved = fresh.length ? await resolveKoreanTickers(fresh) : [];
+  for (const t of resolved) {
     await DB.saveTicker({ name: t.name, code: t.code });
     existingNames.add(t.name);
   }

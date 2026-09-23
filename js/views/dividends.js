@@ -160,7 +160,7 @@ function renderYieldTable(rows, state, refresh) {
     el('thead', {}, el('tr', {}, [
       el('th', {}, '銘柄 / 口座'),
       el('th', { class: 'num' }, '数量'),
-      el('th', { class: 'num' }, [el('span', { class: 'pair' }, '取得単価'), el('span', { class: 'pair' }, '→ 現在株価')]),
+      el('th', { class: 'num' }, [el('span', { class: 'pair' }, '取得単価'), el('span', { class: 'pair' }, '現在株価')]),
       el('th', { class: 'num' }, '1株配当(年)'),
       el('th', { class: 'num' }, '年間配当見込'),
       el('th', { class: 'num' }, [el('span', { class: 'pair' }, '取得利回り'), el('span', { class: 'pair' }, '現在利回り')]),
@@ -175,7 +175,7 @@ function renderYieldRow(r, refresh) {
   const perShareInput = el('input', {
     type: 'number',
     step: '0.0001',
-    value: r.perShare != null ? String(r.perShare) : '',
+    value: r.perShare != null ? String(Math.round(r.perShare * 10000) / 10000) : '',
     placeholder: r.code ? '未取得' : 'コード無',
     title: r.code ? '直接書き換えると予想配当として再計算します' : '「株価」画面で証券コードを設定すると取得できます',
     disabled: r.code ? null : 'disabled',
@@ -201,7 +201,7 @@ function renderYieldRow(r, refresh) {
       el('span', { class: 'sub' }, [el('span', { class: 'broker-dot', style: `background:${r.color}` }), r.brokerName]),
     ]),
     el('td', { class: 'num' }, r.quantity != null ? formatNumber(r.quantity, 4) : '-'),
-    el('td', { class: 'num' }, [el('span', { class: 'pair' }, money(r.unitPrice)), el('span', { class: 'pair' }, '→ ' + money(r.currentPrice))]),
+    el('td', { class: 'num' }, [el('span', { class: 'pair' }, money(r.unitPrice)), el('span', { class: 'pair' }, money(r.currentPrice))]),
     el('td', { class: 'num' }, perShareInput),
     el('td', { class: 'num' }, r.annualIncomeJPY != null ? formatJPY(r.annualIncomeJPY) : '-'),
     el('td', { class: 'num' }, [el('span', { class: 'pair' }, pct(r.yieldOnCost)), el('span', { class: 'pair' }, pct(r.currentYield))]),

@@ -213,7 +213,7 @@ function renderStep2Upload(body, state, refresh) {
 function renderStep3Header(body, state, refresh) {
   const rows = wiz.rawRows.slice(0, 15);
   const wrap = el('div', { class: 'preview-table-wrap' });
-  const table = el('table', {}, [
+  const table = el('table', { class: 'raw-grid' }, [
     el('tbody', {}, rows.map((row, i) => el('tr', { style: i === wiz.headerRowIndex ? 'background:var(--surface-2)' : '' }, [
       el('td', {}, el('label', { class: 'inline-flex' }, [
         el('input', {
@@ -290,7 +290,7 @@ function renderStep4Mapping(body, state, refresh) {
   const previewRows = wiz.dataRows.slice(0, 5);
   body.appendChild(el('div', { class: 'card section-gap' }, [
     el('h2', {}, 'データプレビュー（先頭5行）'),
-    el('div', { class: 'preview-table-wrap' }, el('table', {}, [
+    el('div', { class: 'preview-table-wrap' }, el('table', { class: 'raw-grid' }, [
       el('thead', {}, el('tr', {}, wiz.headers.map((h) => el('th', {}, h)))),
       el('tbody', {}, previewRows.map((row) => el('tr', {}, wiz.headers.map((_, i) => el('td', {}, String(row[i] ?? '')))))),
     ])),
@@ -398,8 +398,11 @@ function normalizeCurrency(raw) {
   const v = String(raw || '').normalize('NFKC').replace(/[\s　]/g, '').toUpperCase();
   if (!v) return 'JPY';
   if (['円', '日本円', 'JPY', '¥', '￥'].includes(v)) return 'JPY';
-  if (['米ドル', 'ドル', 'USD', '$'].includes(v)) return 'USD';
+  if (['米ドル', 'ドル', 'USドル', 'USD', '$'].includes(v)) return 'USD';
   if (['ユーロ', 'EUR', '€'].includes(v)) return 'EUR';
+  if (['ウォン', '韓国ウォン', 'KRW', '₩'].includes(v)) return 'KRW';
+  if (['香港ドル', 'HKD', 'HK$'].includes(v)) return 'HKD';
+  if (['ポンド', '英ポンド', 'GBP', '£'].includes(v)) return 'GBP';
   return v;
 }
 

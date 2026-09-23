@@ -11,7 +11,7 @@ let selectedBrokerId = '';
 let rows = [];
 let loadedFor = null;
 
-const CURRENCIES = ['JPY', 'USD', 'EUR'];
+const CURRENCIES = ['JPY', 'USD', 'KRW', 'EUR', 'HKD', 'GBP'];
 
 function blankRow() {
   return { name: '', code: '', quantity: '', unitPrice: '', currentPrice: '', currency: 'JPY' };
@@ -120,7 +120,7 @@ function renderRow(r, index, state, tickerByName, rerenderTable) {
 
   return el('tr', {}, [
     el('td', {}, bind('name', { placeholder: '例: トヨタ自動車', style: 'width:180px' })),
-    el('td', {}, bind('code', { placeholder: '例: 7203 / AAPL', style: 'width:110px' })),
+    el('td', {}, bind('code', { placeholder: '例: 7203 / AAPL / 005930', title: '数字だけなら通貨から取引所を判断します（JPY→東証、KRW→韓国、HKD→香港）', style: 'width:110px' })),
     el('td', { class: 'num' }, bind('quantity', { type: 'number', step: 'any', placeholder: '100', style: 'width:90px;text-align:right' })),
     el('td', { class: 'num' }, bind('unitPrice', { type: 'number', step: 'any', placeholder: '2500', style: 'width:100px;text-align:right' })),
     el('td', { class: 'num' }, bind('currentPrice', { type: 'number', step: 'any', placeholder: livePlaceholder, style: 'width:120px;text-align:right' })),

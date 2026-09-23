@@ -12,7 +12,8 @@ export function renderPrices(container, state, refresh) {
   container.appendChild(el('h1', {}, '株価（自動取得）'));
   container.appendChild(el('p', { class: 'hint section-gap' },
     (isCloudMode() ? 'クラウド経由で' : 'ローカルサーバー（起動.bat で起動したもの）経由で') +
-    'Yahoo Financeの現在値を取得します。非公式のデータ源のため、15〜20分程度遅延した値になることがあり、投資信託など銘柄コードが無いものは取得できません。'
+    'Yahoo Financeの現在値を取得します。非公式のデータ源のため、15〜20分程度遅延した値になることがあり、投資信託など銘柄コードが無いものは取得できません。' +
+    '証券コードの形式：日本株 7203.T ／ 米国株 AAPL ／ 韓国株 005930.KS（KOSDAQは .KQ）／ 香港株 0700.HK'
   ));
 
   const latest = latestSnapshotPerBroker(state.snapshots);
@@ -121,7 +122,7 @@ export function renderPrices(container, state, refresh) {
 }
 
 function renderTickerRow(r, state, refresh) {
-  const codeInput = el('input', { type: 'text', value: r.code, placeholder: '例: 7203.T / AAPL', style: 'width:120px' });
+  const codeInput = el('input', { type: 'text', value: r.code, placeholder: '例: 7203.T / AAPL / 005930.KS', title: '日本株=.T、韓国KOSPI=.KS、KOSDAQ=.KQ、香港=.HK、米国株は記号のみ', style: 'width:150px' });
   const live = state.livePrices && state.livePrices[r.code];
   const priceCell = el('td', { class: 'num' }, live && !live.error ? formatMoney(live.price, live.currency) : (r.code ? '-' : ''));
   const timeCell = el('td', {}, live && !live.error ? formatTime(live.asOf) : (live && live.error ? el('span', { class: 'hint' }, '取得失敗') : ''));

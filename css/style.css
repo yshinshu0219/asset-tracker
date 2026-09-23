@@ -157,36 +157,75 @@ tr:last-child td { border-bottom: none; }
 .dropzone.dragover { border-color: var(--primary); background: var(--surface-2); color: var(--text); }
 .dropzone input { display: none; }
 
-/* --- phone / narrow screens: sidebar becomes a sticky top bar with scrollable tabs --- */
+.nav-toggle { display: none; }
+
+/* --- phone / narrow screens ---------------------------------------------------------- */
 @media (max-width: 768px) {
   .app-shell { flex-direction: column; }
+
+  /* top bar: brand + menu button; the nav list drops down when opened */
   .sidebar {
-    width: auto; flex-direction: row; align-items: center; gap: 6px;
-    padding: 8px 10px; border-right: none; border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; z-index: 30; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 10px 12px; border-right: none; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 30;
   }
-  .brand { padding: 0 6px 0 0; font-size: 15px; white-space: nowrap; }
-  .nav { flex-direction: row; gap: 4px; }
-  .nav-item { white-space: nowrap; padding: 8px 10px; font-size: 13px; }
+  .brand { padding: 0; font-size: 16px; flex: 1; }
+  .nav-toggle {
+    display: inline-flex; align-items: center; padding: 8px 12px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer;
+  }
+  .nav { display: none; flex-basis: 100%; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); margin-top: 4px; }
+  .sidebar.open .nav { display: flex; }
+  .nav-item { padding: 12px 14px; font-size: 15px; }
   .sidebar-footer, #install-btn { display: none; }
+
   .content { padding: 14px 12px; max-width: none; }
-  .view h1 { font-size: 18px; margin-bottom: 14px; }
-  .card { padding: 14px; overflow-x: auto; }      /* wide tables scroll inside their card, not the page */
+  .view h1 { font-size: 19px; margin-bottom: 14px; }
+  .view h2 { font-size: 15px; }
+  .card { padding: 14px; }
   .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .stat-card .stat-value { font-size: 20px; }
+  .stat-card .stat-value { font-size: 21px; }
+  .stat-card .stat-sub { font-size: 12px; }
   .charts-row { grid-template-columns: 1fr; }
   .chart-card { height: 260px; }
   .mapping-grid { grid-template-columns: 1fr; }
   .broker-card { flex-direction: column; }
   .modal-backdrop { align-items: flex-end; }
   .modal { width: 100%; max-width: 100vw; border-radius: 14px 14px 0 0; max-height: 92vh; padding: 18px 16px; }
-  table { font-size: 12px; }
-  th, td { padding: 7px 5px; }
-  .table-compact input[type=number] { width: 62px; }
   .dropzone { padding: 26px 12px; }
   .steps { gap: 6px; }
   .step-pill { padding: 5px 10px; font-size: 12px; }
   .actions-row .btn { flex: 1; justify-content: center; }
+  /* 16px stops iOS from zooming into inputs */
+  input, select, textarea { font-size: 16px; }
+
+  /* Data tables become stacked cards: the first cell is the title, every other cell shows its
+     column label above the value, two per line. Nothing is squeezed or side-scrolled. */
+  table.stack { font-size: 14px; }
+  table.stack thead { display: none; }
+  table.stack tbody { display: block; }
+  table.stack tr {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  table.stack tr:last-child { border-bottom: none; }
+  table.stack td { display: block; border: none; padding: 0; text-align: left; white-space: normal; }
+  table.stack td.num { text-align: left; }
+  table.stack td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 1px;
+  }
+  table.stack td:first-child { grid-column: 1 / -1; font-size: 15px; font-weight: 600; }
+  table.stack td:first-child::before { display: none; }
+  table.stack td:first-child .sub { font-weight: 400; font-size: 12px; }
+  table.stack td:not([data-label]) { grid-column: 1 / -1; }      /* action buttons / detail rows */
+  table.stack .pair { display: block; line-height: 1.4; }
+  table.stack input[type=number], table.stack input[type=text], table.stack select { width: 100% !important; box-sizing: border-box; }
+  table.stack td .btn { width: auto; }
+
+  /* raw CSV previews stay real grids and scroll inside their box */
+  .preview-table-wrap { overflow-x: auto; }
+  table.raw-grid { font-size: 12px; }
+  table.raw-grid th, table.raw-grid td { padding: 6px 5px; white-space: nowrap; }
 }
 
 .toast {

@@ -9,7 +9,8 @@ export function formatNumber(value, digits = 0) {
   return n.toLocaleString('ja-JP', { maximumFractionDigits: digits });
 }
 
-const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£' };
+const CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', KRW: '₩', HKD: 'HK$' };
+const CURRENCY_DECIMALS = { JPY: 0, KRW: 0 }; // currencies quoted in whole units
 
 // Formats a value in its OWN currency — never prepends ¥ to a non-JPY amount (that would
 // silently mislabel e.g. a $230 price as ¥230). Use this for any raw external quote; use
@@ -18,7 +19,8 @@ export function formatMoney(value, currency = 'JPY') {
   const n = Number(value) || 0;
   if (!currency || currency === 'JPY') return formatJPY(n);
   const symbol = CURRENCY_SYMBOLS[currency];
-  const amount = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const decimals = CURRENCY_DECIMALS[currency] ?? 2;
+  const amount = n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   return symbol ? symbol + amount : amount + ' ' + currency;
 }
 
@@ -35,6 +37,27 @@ export function showToast(message, type = 'info') {
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+}
+
+// Copies each column's header text onto its cells (data-label). On phones the CSS turns table
+// rows into stacked cards and prints that label above every value, so a 6-column table stays
+// readable without shrinking or side-scrolling.
+export function labelTableCells(table) {
+  if (!table || table.dataset.labeled === '1') return;
+  // a header made of several stacked spans ("取得利回り" / "現在利回り") reads as one label
+  const headers = [...table.querySelectorAll(':scope > thead th')].map((th) => {
+    const parts = [...th.children].map((c) => c.textContent.trim()).filter(Boolean);
+    return (parts.length > 1 ? parts.join(' / ') : th.textContent).replace(/\s*→\s*/g, ' → ').trim();
+  });
+  if (headers.length === 0) return;
+  for (const row of table.querySelectorAll(':scope > tbody > tr')) {
+    [...row.children].forEach((cell, i) => {
+      if (cell.tagName !== 'TD' || cell.hasAttribute('colspan')) return;
+      if (headers[i]) cell.dataset.label = headers[i];
+    });
+  }
+  table.dataset.labeled = '1';
+  table.classList.add('stack');
 }
 
 export function el(tag, attrs = {}, children = []) {
@@ -181,14 +204,19 @@ export function costInJPY(item) {
 // --- Live price / ticker helpers ---
 
 // Best-effort conversion of a brokerage CSV's stock/fund code into a Yahoo Finance ticker.
-// A plain numeric code with JPY currency is assumed to be a Tokyo Stock Exchange listing
-// (needs the ".T" suffix); anything else (already has a suffix, or is a foreign ticker like
+// Numeric codes are exchange-local, so the trading currency picks the suffix: JPY → Tokyo
+// (.T), KRW → Korea (.KS for KOSPI; KOSDAQ is .KQ and is resolved at registration time),
+// HKD → Hong Kong (.HK, 4 digits). Anything else (already suffixed, or a US ticker like
 // "AAPL") is used as-is. The result is always just a starting guess — editable in the UI.
 export function guessYahooTicker(code, currency) {
   if (!code) return '';
   const trimmed = String(code).trim().toUpperCase();
   if (!trimmed) return '';
-  if (/^\d+$/.test(trimmed) && (!currency || currency === 'JPY')) return trimmed + '.T';
+  if (/^\d+$/.test(trimmed)) {
+    if (!currency || currency === 'JPY') return trimmed + '.T';
+    if (currency === 'KRW') return trimmed.padStart(6, '0') + '.KS';
+    if (currency === 'HKD') return trimmed.padStart(4, '0') + '.HK';
+  }
   return trimmed;
 }
 

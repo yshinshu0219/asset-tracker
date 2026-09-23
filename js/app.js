@@ -15,7 +15,7 @@ import { renderBackup } from './views/backup.js';
 
 // Shown in the sidebar so "did the update apply?" has a one-glance answer. Keep in step with
 // CACHE_NAME in sw.js.
-const APP_VERSION = '20';
+const APP_VERSION = '21';
 
 const state = { brokers: [], snapshots: [], dividends: [], tickers: [], livePrices: {}, fxRates: {}, dividendInfo: {}, dailySeries: null };
 let currentView = 'dashboard';

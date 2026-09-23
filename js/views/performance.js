@@ -71,12 +71,36 @@ export function renderPerformance(container, state, refresh) {
   container.appendChild(renderAccountCards(series, benchRet, benchMeta, state));
   container.appendChild(el('h2', { style: 'margin:4px 0 10px' }, '一覧で比較'));
   container.appendChild(renderAccountTable(series, totalRet, benchRet, benchMeta, state));
+  container.appendChild(renderFixNotice(series.fixes, state));
   container.appendChild(el('p', { class: 'hint' },
     `対象期間: ${series.dates[0]} 〜 ${series.dates[series.dates.length - 1]}（${series.dates.length}営業日）。` +
     `現在の保有数量で各日の終値から評価した値です。株価を取得できる銘柄 ${series.liveItems}件が日々変動し、` +
     (series.staticItems ? `投資信託など ${series.staticItems}件は取込時の評価額で固定しています。` : '') +
     `${benchMeta.short}との比較はどちらも期間開始日を100とした指数で表示しています。`
   ));
+}
+
+// Says out loud what was corrected in the raw price data, so an odd-looking line can be told
+// apart from a fix (and so a wrong correction is visible instead of silent).
+function renderFixNotice(fixes, state) {
+  if (!fixes || fixes.length === 0) return document.createDocumentFragment();
+  const nameByCode = new Map();
+  for (const t of state.tickers) if (!nameByCode.has(t.code)) nameByCode.set(t.code, t.name);
+  const seen = new Set();
+  const lines = [];
+  for (const f of fixes) {
+    const key = `${f.code}|${f.kind}|${f.date}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = `${nameByCode.get(f.code) || f.code}（${f.code}）`;
+    lines.push(f.kind === 'split'
+      ? `${label} ${f.date}：株式分割・併合の未調整を補正しました（株価を ${formatNumber(f.ratio, 4)} 倍で接続）`
+      : `${label} ${f.date} から ${f.days}日分：あり得ない値だったため除外しました`);
+  }
+  return el('details', { class: 'card section-gap' }, [
+    el('summary', {}, `株価データを自動補正しました（${lines.length}件）`),
+    el('ul', { class: 'hint', style: 'margin:8px 0 0;padding-left:18px;' }, lines.map((t) => el('li', {}, t))),
+  ]);
 }
 
 function neededCodes(state) {

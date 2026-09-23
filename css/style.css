@@ -29,7 +29,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; width: 100%; max-width: 100%; overflow-x: hidden; }
 body {
   margin: 0;
   font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", -apple-system, sans-serif;
@@ -37,7 +37,11 @@ body {
   color: var(--text);
 }
 
-.app-shell { display: flex; min-height: 100vh; }
+/* Charts must never keep a stale pixel width from a previous layout — that would push the
+   page wider than the screen and leave a blank strip down the right edge. */
+canvas { max-width: 100%; }
+
+.app-shell { display: flex; min-height: 100vh; width: 100%; }
 
 .sidebar {
   width: 240px;
@@ -161,12 +165,14 @@ tr:last-child td { border-bottom: none; }
 
 /* --- phone / narrow screens ---------------------------------------------------------- */
 @media (max-width: 768px) {
-  .app-shell { flex-direction: column; }
+  .app-shell { flex-direction: column; width: 100%; max-width: 100%; }
 
-  /* top bar: brand + menu button; the nav list drops down when opened */
+  /* top bar: brand + menu button; the nav list drops down when opened.
+     The safe-area insets keep it clear of a notch/rounded corners without leaving a gap. */
   .sidebar {
-    width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
-    padding: 10px 12px; border-right: none; border-bottom: 1px solid var(--border);
+    width: 100%; max-width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 10px calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));
+    border-right: none; border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 30;
   }
   .brand { padding: 0; font-size: 16px; flex: 1; }
@@ -179,11 +185,17 @@ tr:last-child td { border-bottom: none; }
   .nav-item { padding: 12px 14px; font-size: 15px; }
   .sidebar-footer, #install-btn { display: none; }
 
-  .content { padding: 14px 12px; max-width: none; }
+  .content {
+    width: 100%; max-width: 100%; min-width: 0;
+    padding: 14px calc(12px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+  }
+  .view, .card, .card-grid, .charts-row { min-width: 0; max-width: 100%; }
   .view h1 { font-size: 19px; margin-bottom: 14px; }
   .view h2 { font-size: 15px; }
   .card { padding: 14px; }
   .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  /* per-account cards carry three labelled figures each — too much for a half-width column */
+  .card-grid.account-grid { grid-template-columns: minmax(0, 1fr); }
   .stat-card .stat-value { font-size: 21px; }
   .stat-card .stat-sub { font-size: 12px; }
   .charts-row { grid-template-columns: 1fr; }
@@ -191,7 +203,8 @@ tr:last-child td { border-bottom: none; }
   .mapping-grid { grid-template-columns: 1fr; }
   .broker-card { flex-direction: column; }
   .modal-backdrop { align-items: flex-end; }
-  .modal { width: 100%; max-width: 100vw; border-radius: 14px 14px 0 0; max-height: 92vh; padding: 18px 16px; }
+    /* 100vw would include the scrollbar width and overflow by a few pixels */
+  .modal { width: 100%; max-width: 100%; border-radius: 14px 14px 0 0; max-height: 92vh; padding: 18px 16px; }
   .dropzone { padding: 26px 12px; }
   .steps { gap: 6px; }
   .step-pill { padding: 5px 10px; font-size: 12px; }
@@ -204,12 +217,13 @@ tr:last-child td { border-bottom: none; }
   table.stack { font-size: 14px; }
   table.stack thead { display: none; }
   table.stack tbody { display: block; }
+  /* minmax(0,…) so a long unbreakable value can't widen the column past the screen */
   table.stack tr {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 14px;
     padding: 12px 0; border-bottom: 1px solid var(--border);
   }
   table.stack tr:last-child { border-bottom: none; }
-  table.stack td { display: block; border: none; padding: 0; text-align: left; white-space: normal; }
+  table.stack td { display: block; border: none; padding: 0; text-align: left; white-space: normal; min-width: 0; overflow-wrap: anywhere; }
   table.stack td.num { text-align: left; }
   table.stack td[data-label]::before {
     content: attr(data-label); display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 1px;

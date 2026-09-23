@@ -6,7 +6,7 @@ import { BENCHMARKS, buildValueSeries, benchmarkSeries, computeReturns, normaliz
 let chart = null;
 let benchmarkCode = BENCHMARKS[0].code;
 let chartPeriod = 'ytd';       // 'mtd' | 'ytd' | '1y'
-let chartTarget = 'total';     // 'total' | brokerId
+let chartTarget = 'all';       // 'all' (every account overlaid) | 'total' | brokerId
 let loading = false;
 
 const REFRESH_MS = 30 * 60 * 1000;
@@ -65,8 +65,11 @@ export function renderPerformance(container, state, refresh) {
   const benchRet = bench ? computeReturns(series.dates, bench) : null;
 
   container.appendChild(renderControls(container, state, refresh, benchMeta));
+  container.appendChild(el('h2', { style: 'margin:4px 0 10px' }, '資産全体'));
   container.appendChild(renderSummaryCards(totalRet, benchRet, benchMeta));
   container.appendChild(renderChartCard(series, bench, benchMeta, state));
+  container.appendChild(renderAccountCards(series, benchRet, benchMeta, state));
+  container.appendChild(el('h2', { style: 'margin:4px 0 10px' }, '一覧で比較'));
   container.appendChild(renderAccountTable(series, totalRet, benchRet, benchMeta, state));
   container.appendChild(el('p', { class: 'hint' },
     `対象期間: ${series.dates[0]} 〜 ${series.dates[series.dates.length - 1]}（${series.dates.length}営業日）。` +
@@ -142,12 +145,53 @@ function renderSummaryCards(totalRet, benchRet, benchMeta) {
   return grid;
 }
 
+// One card per account, so each family member's result is readable at a glance instead of
+// having to pick their account from a dropdown.
+function renderAccountCards(series, benchRet, benchMeta, state) {
+  const brokerById = new Map(state.brokers.map((b) => [b.id, b]));
+  const ids = Object.keys(series.byBroker);
+  const wrap = el('div', { class: 'section-gap' }, [
+    el('h2', { style: 'margin:4px 0 10px' }, `口座別の成績（${ids.length}口座）`),
+  ]);
+  const grid = el('div', { class: 'card-grid account-grid' });
+
+  for (const id of ids) {
+    const ret = computeReturns(series.dates, series.byBroker[id]);
+    const broker = brokerById.get(id);
+    const line = (label, r, benchPeriod) => {
+      const diff = r && benchPeriod ? r.pct - benchPeriod.pct : null;
+      return el('div', { style: 'display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid var(--border);' }, [
+        el('span', { class: 'hint' }, label),
+        el('span', { class: 'num ' + tone(r && r.pct), style: 'text-align:right' }, [
+          el('span', { class: 'pair', style: 'font-weight:600' }, r ? `${signed(r.pct)}%` : '-'),
+          el('span', { class: 'pair hint' }, r ? `${signedJPY(r.abs)}${diff != null ? `／${benchMeta.short}比 ${signed(diff)}pt` : ''}` : 'データ不足'),
+        ]),
+      ]);
+    };
+    grid.appendChild(el('div', { class: 'card' }, [
+      el('div', { style: 'display:flex;align-items:center;gap:6px;margin-bottom:6px;' }, [
+        el('span', { class: 'broker-dot', style: `background:${broker ? broker.color : '#999'}` }),
+        el('strong', {}, broker ? broker.name : '(削除済み)'),
+      ]),
+      el('div', { class: 'stat-value', style: 'font-size:20px' }, formatJPY(ret.last)),
+      line('前日比', ret.day, benchRet && benchRet.day),
+      line('月初来', ret.mtd, benchRet && benchRet.mtd),
+      line('年初来', ret.ytd, benchRet && benchRet.ytd),
+    ]));
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
 function renderChartCard(series, bench, benchMeta, state) {
   const brokerById = new Map(state.brokers.map((b) => [b.id, b]));
+  const accountIds = Object.keys(series.byBroker);
+  if (chartTarget === 'all' && accountIds.length < 2) chartTarget = 'total';
   const targetSelect = el('select', {}, [
+    accountIds.length >= 2 ? el('option', { value: 'all', selected: chartTarget === 'all' ? 'selected' : null }, '口座ごとに比較') : null,
     el('option', { value: 'total', selected: chartTarget === 'total' ? 'selected' : null }, '資産全体'),
-    ...Object.keys(series.byBroker).map((id) => el('option', { value: id, selected: chartTarget === id ? 'selected' : null }, brokerById.get(id)?.name || '?')),
-  ]);
+    ...accountIds.map((id) => el('option', { value: id, selected: chartTarget === id ? 'selected' : null }, brokerById.get(id)?.name || '?')),
+  ].filter(Boolean));
   const periodSelect = el('select', {}, [
     el('option', { value: 'mtd', selected: chartPeriod === 'mtd' ? 'selected' : null }, '月初来'),
     el('option', { value: 'ytd', selected: chartPeriod === 'ytd' ? 'selected' : null }, '年初来'),
@@ -156,15 +200,15 @@ function renderChartCard(series, bench, benchMeta, state) {
   const canvas = el('canvas', { id: 'performance-chart' });
   const card = el('div', { class: 'card chart-card section-gap', style: 'height:360px' }, [
     el('div', { class: 'inline-flex', style: 'justify-content:space-between;margin-bottom:8px;' }, [
-      el('h2', { style: 'margin:0' }, `${benchMeta.short}との値動き比較（期間開始＝100）`),
+      el('h2', { style: 'margin:0' }, `値動き比較（期間開始＝100）`),
       el('div', { class: 'inline-flex' }, [targetSelect, periodSelect]),
     ]),
     canvas,
   ]);
 
   const draw = () => {
-    const values = chartTarget === 'total' ? series.total : (series.byBroker[chartTarget] || series.total);
-    const ret = computeReturns(series.dates, values);
+    // the period start is taken from the total series so every line shares one baseline
+    const ret = computeReturns(series.dates, series.total);
     const lastDate = series.dates[series.dates.length - 1];
     let fromDate;
     if (chartPeriod === 'mtd') fromDate = ret.mtd ? ret.mtd.baseDate : series.dates[0];
@@ -173,17 +217,28 @@ function renderChartCard(series, bench, benchMeta, state) {
       const d = new Date(lastDate + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() - 1);
       fromDate = d.toISOString().slice(0, 10);
     }
-    const mine = normalizeFrom(series.dates, values, fromDate);
+
+    const lines = chartTarget === 'all'
+      ? accountIds.map((id) => ({ label: brokerById.get(id)?.name || '口座', color: brokerById.get(id)?.color || '#2f6fed', values: series.byBroker[id] }))
+      : [{
+        label: chartTarget === 'total' ? '資産全体' : (brokerById.get(chartTarget)?.name || '口座'),
+        color: chartTarget === 'total' ? '#2f6fed' : (brokerById.get(chartTarget)?.color || '#2f6fed'),
+        values: chartTarget === 'total' ? series.total : (series.byBroker[chartTarget] || series.total),
+      }];
+
     const theirs = bench ? normalizeFrom(series.dates, bench, fromDate) : [];
-    const labels = mine.map((p) => p.date);
-    const label = chartTarget === 'total' ? '資産全体' : (brokerById.get(chartTarget)?.name || '口座');
+    const labels = (normalizeFrom(series.dates, series.total, fromDate)).map((p) => p.date);
     if (chart) chart.destroy();
     chart = new Chart(canvas, {
       type: 'line',
       data: {
         labels,
         datasets: [
-          { label, data: mine.map((p) => p.value), borderColor: '#2f6fed', backgroundColor: 'rgba(47,111,237,0.10)', fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2 },
+          ...lines.map((l) => ({
+            label: l.label,
+            data: normalizeFrom(series.dates, l.values, fromDate).map((p) => p.value),
+            borderColor: l.color, fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2,
+          })),
           { label: benchMeta.short, data: theirs.map((p) => p.value), borderColor: '#9aa0ac', borderDash: [6, 4], fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2 },
         ],
       },
@@ -239,7 +294,6 @@ function renderAccountTable(series, totalRet, benchRet, benchMeta, state) {
     ]));
   }
   return el('div', { class: 'card section-gap' }, [
-    el('h2', {}, '口座別の成績'),
     el('table', { class: 'table-compact' }, [
       el('thead', {}, el('tr', {}, [
         el('th', {}, '口座'), el('th', { class: 'num' }, '評価額'),

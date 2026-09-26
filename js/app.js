@@ -9,6 +9,8 @@ import { renderImport } from './views/import.js';
 import { renderManual } from './views/manual.js';
 import { renderBrokers } from './views/brokers.js';
 import { renderHistory } from './views/history.js';
+import { renderRecords } from './views/records.js';
+import { updateRecords } from './records.js';
 import { renderDividends } from './views/dividends.js';
 import { renderPrices, refreshAllPrices } from './views/prices.js';
 import { syncTickersToServer, registerFundTickers } from './prices.js';
@@ -16,7 +18,7 @@ import { renderBackup } from './views/backup.js';
 
 // Shown in the sidebar so "did the update apply?" has a one-glance answer. Keep in step with
 // CACHE_NAME in sw.js.
-const APP_VERSION = '24';
+const APP_VERSION = '26';
 
 const state = { brokers: [], snapshots: [], dividends: [], tickers: [], livePrices: {}, fxRates: {}, dividendInfo: {}, dailySeries: null };
 let currentView = 'dashboard';
@@ -71,6 +73,7 @@ function renderCurrentView() {
     manual: () => renderManual(container, state, refresh),
     brokers: () => renderBrokers(container, state, refresh),
     history: () => renderHistory(container, state, refresh),
+    records: () => renderRecords(container, state, refresh),
     dividends: () => renderDividends(container, state, refresh),
     prices: () => renderPrices(container, state, refresh),
     backup: () => renderBackup(container, state, refresh),
@@ -180,5 +183,8 @@ document.addEventListener('visibilitychange', async () => {
     state.tickers = await DB.getAllTickers();
     state.dailySeries = null;  // 成績 must refetch now that the funds have series
     await refreshAllPrices(state, () => { renderCurrentView(); });
-  }).catch((e) => console.error('Fund matching failed', e));
+  }).catch((e) => console.error('Fund matching failed', e))
+    // then write the daily holdings record for every trading day since the last one (after the
+    // fund matching, so newly matched funds are priced in it)
+    .finally(() => updateRecords(state).catch((e) => console.error('Daily records failed', e)));
 })();

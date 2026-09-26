@@ -90,6 +90,14 @@ async function localRequest(action, params) {
       path = '/api/dividends?' + qs({ codes: (params.codes || []).join(',') }); break;
     case 'fundsearch':
       path = '/api/fundsearch?' + qs({ q: params.q || '' }); break;
+    case 'recordStatus':
+      path = '/api/records/status'; break;
+    case 'getRecords':
+      path = '/api/records?' + qs({ month: params.month || '' }); break;
+    case 'addRecords':
+      path = '/api/records';
+      init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ records: params.records || [] }) };
+      break;
     case 'tickers':
       path = '/api/tickers';
       init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tickers: params.tickers || [] }) };

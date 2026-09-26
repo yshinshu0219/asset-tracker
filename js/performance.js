@@ -21,7 +21,7 @@ export const BENCHMARKS = [
 ];
 
 // Returns fn(date) → last close on or before `date`, or null if the series starts later.
-function forwardFillLookup(series) {
+export function forwardFillLookup(series) {
   const dates = series.map((p) => p.date);
   return (date) => {
     let lo = 0;
@@ -61,7 +61,9 @@ const isBreak = (ratio) => !(ratio >= BREAK_LOW && ratio <= BREAK_HIGH);
 // a decimal shift moves the price by a power of ten and nothing else
 const isDecimalShift = (ratio) => [0.01, 0.1, 10, 100].some((p) => Math.abs(ratio / p - 1) < 0.05);
 
-function repairSeries(entry, code) {
+// `rescale: false` keeps prices as they were on each day (daily records); the default puts them in
+// today's share terms (performance charts, which price history with today's share count).
+export function repairSeries(entry, code, { rescale = true } = {}) {
   const raw = entry && Array.isArray(entry.daily)
     ? entry.daily.filter((p) => p && p.close > 0 && p.date).sort((a, b) => a.date.localeCompare(b.date))
     : [];
@@ -101,7 +103,7 @@ function repairSeries(entry, code) {
   // Whatever breaks are left are lasting changes of level. On a price-limited market that can
   // only be an unadjusted split, so the earlier segments are restated onto the newest scale.
   // Elsewhere (US stocks, indices) a real crash of this size is possible, so they are left be.
-  if (kept.length === 1 || !PRICE_LIMITED.test(code)) return { daily: kept.flat(), fixes };
+  if (!rescale || kept.length === 1 || !PRICE_LIMITED.test(code)) return { daily: kept.flat(), fixes };
 
   const scaled = [];
   let factor = 1;

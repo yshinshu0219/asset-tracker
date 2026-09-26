@@ -1,5 +1,6 @@
-import { el, formatJPY, formatNumber, showToast, latestSnapshotPerBroker } from '../util.js';
+import { el, formatJPY, formatNumber, formatTime, showToast, latestSnapshotPerBroker } from '../util.js';
 import { fetchDailySeries } from '../prices.js';
+import { loadDailyCache, saveDailyCache } from '../priceCache.js';
 import { describeApiError } from '../api.js';
 import { BENCHMARKS, buildValueSeries, benchmarkSeries, computeReturns, normalizeFrom, codeForItem } from '../performance.js';
 
@@ -8,8 +9,12 @@ let benchmarkCode = BENCHMARKS[0].code;
 let chartPeriod = 'ytd';       // 'mtd' | 'ytd' | '1y'
 let chartTarget = 'all';       // 'all' (every account overlaid) | 'total' | brokerId
 let loading = false;
+let restoring = false;
+let attemptedAt = 0;          // last network attempt, so a failure isn't retried on every render
+let refreshError = null;      // why the last background refresh failed (cached data still shown)
 
 const REFRESH_MS = 30 * 60 * 1000;
+const RETRY_MS = 60 * 1000;
 
 export function renderPerformance(container, state, refresh) {
   container.innerHTML = '';
@@ -23,31 +28,64 @@ export function renderPerformance(container, state, refresh) {
     return;
   }
 
-  const codes = neededCodes(state);
-  const cache = state.dailySeries;
-  const stale = !cache || Date.now() - cache.fetchedAt > REFRESH_MS || codes.some((c) => !(c in cache.results));
-  if (stale && !loading) {
-    loading = true;
-    container.appendChild(el('div', { class: 'card' }, el('p', { class: 'hint' }, '日次の株価データを取得しています…（銘柄数によって数秒かかります）')));
-    fetchDailySeries(codes, '2y').then((res) => {
-      loading = false;
-      state.dailySeries = { fetchedAt: Date.now(), results: { ...(cache ? cache.results : {}), ...res.results }, error: res.error };
-      renderPerformance(container, state, refresh);
-    });
-    return;
-  }
-  if (loading) {
-    container.appendChild(el('div', { class: 'card' }, el('p', { class: 'hint' }, '日次の株価データを取得しています…')));
+  const rerender = () => renderPerformance(container, state, refresh);
+  const waiting = (text) => container.appendChild(el('div', { class: 'card' }, el('p', { class: 'hint' }, text)));
+
+  // First visit since the app opened: draw from the series saved on this device last time,
+  // then bring it up to date in the background — instead of a blank screen until every one of
+  // the ~80 price series has been downloaded again.
+  if (!state.dailySeries) {
+    if (!restoring) {
+      restoring = true;
+      loadDailyCache().then((saved) => {
+        restoring = false;
+        if (!state.dailySeries) state.dailySeries = saved || { fetchedAt: 0, results: {} };
+        rerender();
+      });
+    }
+    waiting('日次の株価データを準備しています…');
     return;
   }
 
-  if (cache.error) {
+  const codes = neededCodes(state);
+  const cache = state.dailySeries;
+  const covered = codes.every((c) => c in cache.results);
+  const stale = !covered || Date.now() - cache.fetchedAt > REFRESH_MS;
+  if (stale && !loading && Date.now() - attemptedAt > RETRY_MS) {
+    loading = true;
+    attemptedAt = Date.now();
+    fetchDailySeries(codes, '2y').then((res) => {
+      loading = false;
+      if (res.error) {
+        refreshError = res.error;
+      } else {
+        refreshError = null;
+        state.dailySeries = { fetchedAt: Date.now(), results: { ...state.dailySeries.results, ...res.results } };
+        saveDailyCache(state.dailySeries);
+      }
+      rerender();
+    });
+  }
+
+  if (!covered) {
+    if (loading) {
+      waiting('日次の株価データを取得しています…（初回や銘柄を追加したときは数秒かかります）');
+      return;
+    }
     container.appendChild(el('div', { class: 'card section-gap', style: 'border-color:var(--danger)' }, [
       el('h2', {}, '⚠ 株価データを取得できません'),
-      el('p', { class: 'hint' }, describeApiError(cache.error)),
-      el('button', { class: 'btn btn-sm', onclick: () => { state.dailySeries = null; renderPerformance(container, state, refresh); } }, '再試行'),
+      el('p', { class: 'hint' }, describeApiError(refreshError)),
+      el('button', { class: 'btn btn-sm', onclick: () => { attemptedAt = 0; rerender(); } }, '再試行'),
     ]));
     return;
+  }
+
+  // Showing saved data: say how old it is, and whether a newer copy is on its way.
+  if (loading || refreshError) {
+    const asOf = cache.fetchedAt ? formatTime(new Date(cache.fetchedAt).toISOString()) : '-';
+    container.appendChild(el('p', { class: 'hint section-gap' }, loading
+      ? `⟳ 最新の株価を取得中です（いまの表示は ${asOf} 時点のデータ）`
+      : `⚠ 最新の株価を取得できなかったため、${asOf} 時点のデータを表示しています。${describeApiError(refreshError)}`));
   }
 
   const series = buildValueSeries({ snapshots: state.snapshots, tickers: state.tickers, dailySeries: cache.results });
@@ -121,7 +159,13 @@ function renderControls(container, state, refresh, benchMeta) {
   benchSelect.addEventListener('change', () => { benchmarkCode = benchSelect.value; renderPerformance(container, state, refresh); });
   const reloadBtn = el('button', {
     class: 'btn btn-sm',
-    onclick: () => { state.dailySeries = null; renderPerformance(container, state, refresh); showToast('株価データを再取得します'); },
+    onclick: () => {
+      // keep the current chart on screen and fetch behind it
+      state.dailySeries = { ...state.dailySeries, fetchedAt: 0 };
+      attemptedAt = 0;
+      renderPerformance(container, state, refresh);
+      showToast('株価データを再取得します');
+    },
   }, '🔄 再取得');
   return el('div', { class: 'card section-gap inline-flex', style: 'justify-content:space-between' }, [
     el('div', { class: 'inline-flex' }, [el('label', { class: 'hint' }, '比較する基準'), benchSelect]),

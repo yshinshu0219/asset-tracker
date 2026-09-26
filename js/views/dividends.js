@@ -2,7 +2,7 @@ import { DB } from '../db.js';
 import {
   el, formatJPY, formatMoney, formatNumber, showToast, todayStr, costInJPY,
   latestSnapshotPerBroker, buildMonthlyDividendTotals, buildYearlyDividendTotals, trailing12MonthDividend,
-  unitsPerPrice,
+  unitsPerPrice, isFundCode,
 } from '../util.js';
 import { refreshAllPrices } from './prices.js';
 import { describeApiError } from '../api.js';
@@ -52,6 +52,13 @@ function renderDataNotice(state, rows) {
   return null;
 }
 
+// 投資信託 are left out of the yield figures: most are accumulating index funds whose 分配金 is
+// 0円, so counting them as "0% yield" holdings only dilutes the averages of the stocks the yield
+// is meant to describe. Recognised by their fund code, their 10,000口 unit, or the CSV's class.
+function isFundHolding(item, code) {
+  return isFundCode(code) || item.unitDivisor === 10000 || /投資信託|投信/.test(item.assetClass || '');
+}
+
 // One row per holding: acquisition price and current price come from the imported CSV and the
 // live quote, the per-share dividend from the ticker's payment history (or a manual override).
 function buildYieldRows({ snapshots, tickers, livePrices, fxRates, dividendInfo, dividends, brokerById }) {
@@ -62,6 +69,7 @@ function buildYieldRows({ snapshots, tickers, livePrices, fxRates, dividendInfo,
     for (const item of snapshot.items) {
       const ticker = tickerByName.get(item.name);
       const code = ticker ? ticker.code : null;
+      if (isFundHolding(item, code)) continue;
       const quote = code ? livePrices[code] : null;
       const info = code ? dividendInfo[code] : null;
 
@@ -145,6 +153,7 @@ function renderYieldTable(rows, state, refresh) {
       }, '🔄 配当データを更新'),
     ]),
     el('p', { class: 'hint' },
+      '個別株（ETF・REITなど上場銘柄を含む）が対象で、投資信託は含めていません。' +
       '1株配当は直近12ヶ月の配当実績（1株あたり）から算出しています。取得利回り＝1株配当÷取得単価、現在利回り＝1株配当÷現在株価です。' +
       '増配・減配を反映したい場合は「1株配当」欄を直接書き換えると、その値で再計算されます。'
     ),

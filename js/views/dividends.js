@@ -2,6 +2,7 @@ import { DB } from '../db.js';
 import {
   el, formatJPY, formatMoney, formatNumber, showToast, todayStr, costInJPY,
   latestSnapshotPerBroker, buildMonthlyDividendTotals, buildYearlyDividendTotals, trailing12MonthDividend,
+  unitsPerPrice,
 } from '../util.js';
 import { refreshAllPrices } from './prices.js';
 import { describeApiError } from '../api.js';
@@ -76,7 +77,7 @@ function buildYieldRows({ snapshots, tickers, livePrices, fxRates, dividendInfo,
         : (info && !info.error && info.perShareAnnual != null ? info.perShareAnnual : null);
 
       const quantity = item.quantity != null && !Number.isNaN(item.quantity) ? item.quantity : null;
-      const annualIncomeNative = perShare != null && quantity != null ? perShare * quantity : null;
+      const annualIncomeNative = perShare != null && quantity != null ? (perShare * quantity) / unitsPerPrice(item, code) : null;
       const annualIncomeJPY = annualIncomeNative != null && fxRate != null ? annualIncomeNative * fxRate : null;
 
       rows.push({

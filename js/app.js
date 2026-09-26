@@ -1,7 +1,7 @@
 import { DB } from './db.js';
 import { initSync, pullFromServer, isDirty } from './sync.js';
 import { isCloudMode } from './api.js';
-import { labelTableCells } from './util.js';
+import { labelTableCells, isBareTokyoCode, latestSnapshotPerBroker } from './util.js';
 import { buildDefaultBrokers } from './defaultBrokers.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderPerformance } from './views/performance.js';
@@ -11,11 +11,12 @@ import { renderBrokers } from './views/brokers.js';
 import { renderHistory } from './views/history.js';
 import { renderDividends } from './views/dividends.js';
 import { renderPrices, refreshAllPrices } from './views/prices.js';
+import { syncTickersToServer, registerFundTickers } from './prices.js';
 import { renderBackup } from './views/backup.js';
 
 // Shown in the sidebar so "did the update apply?" has a one-glance answer. Keep in step with
 // CACHE_NAME in sw.js.
-const APP_VERSION = '21';
+const APP_VERSION = '24';
 
 const state = { brokers: [], snapshots: [], dividends: [], tickers: [], livePrices: {}, fxRates: {}, dividendInfo: {}, dailySeries: null };
 let currentView = 'dashboard';
@@ -48,7 +49,17 @@ async function loadState() {
   state.brokers = brokers;
   state.snapshots = await DB.getAllSnapshots();
   state.dividends = await DB.getAllDividends();
-  state.tickers = await DB.getAllTickers();
+  // Tickers registered before alphanumeric Tokyo codes were recognised were stored bare
+  // ("285A" instead of "285A.T"). Yahoo never finds those, so the holding sat frozen at its
+  // imported value — repair them once.
+  let tickers = await DB.getAllTickers();
+  const bare = tickers.filter((t) => isBareTokyoCode(t.code));
+  if (bare.length) {
+    for (const t of bare) await DB.saveTicker({ ...t, code: String(t.code).trim().toUpperCase() + '.T' });
+    tickers = await DB.getAllTickers();
+    syncTickersToServer(tickers).catch(() => {});
+  }
+  state.tickers = tickers;
 }
 
 function renderCurrentView() {
@@ -161,4 +172,13 @@ document.addEventListener('visibilitychange', async () => {
   if (state.tickers.length) {
     refreshAllPrices(state, () => { renderCurrentView(); }).catch((e) => console.error('Initial price refresh failed', e));
   }
+  // 投資信託 imported before fund prices were supported have no code yet — match them by name
+  // once, then price them like everything else
+  const heldItems = latestSnapshotPerBroker(state.snapshots).flatMap((s) => s.items);
+  registerFundTickers(heldItems).then(async (added) => {
+    if (!added) return;
+    state.tickers = await DB.getAllTickers();
+    state.dailySeries = null;  // 成績 must refetch now that the funds have series
+    await refreshAllPrices(state, () => { renderCurrentView(); });
+  }).catch((e) => console.error('Fund matching failed', e));
 })();

@@ -5,7 +5,15 @@
 // hold today performed", which is what portfolio apps like カビュー show. Holdings without a
 // ticker (投資信託 etc.) have no daily quotes and are held flat at their last imported value, so
 // they contribute to the level but not to the day-to-day movement.
-import { latestSnapshotPerBroker } from './util.js';
+import { latestSnapshotPerBroker, guessYahooTicker, unitsPerPrice } from './util.js';
+
+// The ticker a holding is priced with: the one registered for its name (the user may have
+// corrected it by hand on the 株価 screen), else one derived from the code the CSV carried —
+// so a holding whose name never made it into the ticker list still moves with its price.
+export function codeForItem(item, tickerByName) {
+  const code = tickerByName.get(item.name) || item.code;
+  return code ? guessYahooTicker(code, item.currency) || null : null;
+}
 
 export const BENCHMARKS = [
   { code: '1306.T', label: 'TOPIX（連動ETF 1306）', short: 'TOPIX' },
@@ -139,12 +147,12 @@ export function buildValueSeries({ snapshots, tickers, dailySeries }) {
   const plan = latest.map((snap) => ({
     brokerId: snap.brokerId,
     items: snap.items.map((item) => {
-      const code = tickerByName.get(item.name);
+      const code = codeForItem(item, tickerByName);
       const currency = item.currency && item.currency !== 'JPY' ? item.currency : 'JPY';
       const priceLookup = item.quantity > 0 ? seriesFor(code) : null;
       const fxLookup = currency === 'JPY' ? null : seriesFor(`${currency}JPY=X`);
       const live = !!priceLookup && (currency === 'JPY' || !!fxLookup);
-      return { item, priceLookup, fxLookup, live };
+      return { item, code, priceLookup, fxLookup, live };
     }),
   }));
 
@@ -165,10 +173,10 @@ export function buildValueSeries({ snapshots, tickers, dailySeries }) {
   let staticItems = 0;
   for (const p of plan) {
     const values = new Array(dates.length).fill(0);
-    for (const { item, priceLookup, fxLookup, live } of p.items) {
+    for (const { item, code, priceLookup, fxLookup, live } of p.items) {
       if (live) {
         liveItems++;
-        const divisor = item.unitDivisor || 1;
+        const divisor = unitsPerPrice(item, code);
         for (let i = 0; i < dates.length; i++) {
           const close = priceLookup(dates[i]);
           const fx = fxLookup ? fxLookup(dates[i]) : 1;

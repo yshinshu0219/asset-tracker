@@ -88,6 +88,8 @@ async function localRequest(action, params) {
       path = '/api/history?' + qs({ code: params.code || '' }); break;
     case 'dividends':
       path = '/api/dividends?' + qs({ codes: (params.codes || []).join(',') }); break;
+    case 'fundsearch':
+      path = '/api/fundsearch?' + qs({ q: params.q || '' }); break;
     case 'tickers':
       path = '/api/tickers';
       init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tickers: params.tickers || [] }) };

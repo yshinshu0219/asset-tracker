@@ -78,6 +78,92 @@ async function resolveKoreanTickers(guessed) {
   });
 }
 
+// --- 投資信託 ------------------------------------------------------------------------------
+// Broker CSVs carry a fund's NAME but no code, so the code is looked up in the 投資信託協会's
+// fund library. Names differ slightly between the two (全角/半角, spaces, a trailing nickname
+// such as "(オルカン)"), so the search is retried with trailing parentheses stripped, and only
+// an unambiguous hit is accepted — a wrong fund would be worse than an unpriced one.
+
+export async function searchFunds(keyword) {
+  const res = await api('fundsearch', { q: keyword });
+  return res.ok ? res.results || [] : null;
+}
+
+const fundKey = (s) => String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+
+function fundQueries(name) {
+  const queries = [];
+  let q = String(name || '').normalize('NFKC').replace(/^[\[【][^\]】]*[\]】]\s*/, '').trim();
+  while (q && !queries.includes(q)) {
+    queries.push(q);
+    const shorter = q.replace(/\s*\([^()]*\)\s*$/, '').trim();
+    if (shorter === q) break;
+    q = shorter;
+  }
+  return queries;
+}
+
+// The 基準価額 the imported value implies (per 10,000 口). Guards against a same-named but
+// different fund; null when the CSV lacks the numbers.
+function impliedNav(item) {
+  return item.quantity > 0 && item.value > 0 ? (item.value / item.quantity) * 10000 : null;
+}
+
+export async function matchFund(item) {
+  const expected = impliedNav(item);
+  const plausible = (c) => !expected || !c.nav || (c.nav / expected > 0.5 && c.nav / expected < 2);
+  for (const q of fundQueries(item.name)) {
+    const results = await searchFunds(q);
+    if (results == null) return { error: true };
+    const candidates = results.filter(plausible);
+    const exact = candidates.filter((c) => fundKey(c.name) === fundKey(q) || fundKey(c.name) === fundKey(item.name));
+    if (exact.length === 1) return { fund: exact[0] };
+    if (results.length === 1 && candidates.length === 1) return { fund: candidates[0] };
+    if (results.length > 1) return { fund: null };  // ambiguous — a shorter query only widens it
+  }
+  return { fund: null };
+}
+
+// Names already tried without success, so each app start doesn't search them all again.
+const FUND_MISS_KEY = 'assetTrackerFundMisses';
+const FUND_MISS_TTL = 7 * 24 * 3600 * 1000;
+function readMisses() {
+  try { return JSON.parse(localStorage.getItem(FUND_MISS_KEY) || '{}'); } catch (e) { return {}; }
+}
+function writeMisses(m) {
+  try { localStorage.setItem(FUND_MISS_KEY, JSON.stringify(m)); } catch (e) { /* not essential */ }
+}
+
+// Registers a fund code for every holding that has no code yet and matches a fund. Returns the
+// number registered. Safe to call repeatedly — already-registered and recently-missed names are
+// skipped.
+export async function registerFundTickers(items) {
+  const existing = new Set((await DB.getAllTickers()).map((t) => t.name));
+  const misses = readMisses();
+  const now = Date.now();
+  const seen = new Set();
+  let added = 0;
+  for (const item of items) {
+    const name = item.name;
+    if (!name || seen.has(name) || existing.has(name) || item.code) continue;
+    seen.add(name);
+    if (!(item.quantity > 0) || (item.currency && item.currency !== 'JPY')) continue;
+    if (misses[name] && now - misses[name] < FUND_MISS_TTL) continue;
+    const { fund, error } = await matchFund(item);
+    if (error) break;  // back end unreachable or outdated — try again next time
+    if (fund) {
+      await DB.saveTicker({ name, code: fund.code, fundName: fund.name });
+      added++;
+      delete misses[name];
+    } else {
+      misses[name] = now;
+    }
+  }
+  writeMisses(misses);
+  if (added) await syncTickersToServer(await DB.getAllTickers());
+  return added;
+}
+
 // Ensures every holding name that has a guessed ticker code has a `tickers` DB row, without
 // clobbering codes the user already edited by hand. Returns the up-to-date ticker list.
 export async function ensureTickersRegistered(newlyGuessed) {

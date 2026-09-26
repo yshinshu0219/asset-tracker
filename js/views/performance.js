@@ -1,7 +1,7 @@
 import { el, formatJPY, formatNumber, showToast, latestSnapshotPerBroker } from '../util.js';
 import { fetchDailySeries } from '../prices.js';
 import { describeApiError } from '../api.js';
-import { BENCHMARKS, buildValueSeries, benchmarkSeries, computeReturns, normalizeFrom } from '../performance.js';
+import { BENCHMARKS, buildValueSeries, benchmarkSeries, computeReturns, normalizeFrom, codeForItem } from '../performance.js';
 
 let chart = null;
 let benchmarkCode = BENCHMARKS[0].code;
@@ -108,7 +108,7 @@ function neededCodes(state) {
   const codes = new Set([benchmarkCode]);
   for (const snap of latestSnapshotPerBroker(state.snapshots)) {
     for (const item of snap.items) {
-      const code = tickerByName.get(item.name);
+      const code = codeForItem(item, tickerByName);
       if (code) codes.add(code);
       if (item.currency && item.currency !== 'JPY') codes.add(`${item.currency}JPY=X`);
     }
@@ -173,11 +173,9 @@ function renderSummaryCards(totalRet, benchRet, benchMeta) {
 // having to pick their account from a dropdown.
 function renderAccountCards(series, benchRet, benchMeta, state) {
   const brokerById = new Map(state.brokers.map((b) => [b.id, b]));
-  const snapByBroker = new Map(latestSnapshotPerBroker(state.snapshots).map((s) => [s.brokerId, s]));
   const ids = Object.keys(series.byBroker);
   const wrap = el('div', { class: 'section-gap' }, [
     el('h2', { style: 'margin:4px 0 10px' }, `口座別の成績（${ids.length}口座）`),
-    renderDuplicateWarning(ids, snapByBroker, brokerById),
   ]);
   const grid = el('div', { class: 'card-grid account-grid' });
 
@@ -200,11 +198,6 @@ function renderAccountCards(series, benchRet, benchMeta, state) {
         el('strong', {}, broker ? broker.name : '(削除済み)'),
       ]),
       el('div', { class: 'stat-value', style: 'font-size:20px' }, formatJPY(ret.last)),
-      // the holdings behind the number, so two accounts showing the same figure can be told
-      // apart at a glance instead of leaving the user to wonder whether it is a bug
-      el('div', { class: 'stat-sub' }, snapByBroker.has(id)
-        ? `${snapByBroker.get(id).items.length}銘柄（${snapByBroker.get(id).date} 取込）`
-        : '取込データなし'),
       line('前日比', ret.day, benchRet && benchRet.day),
       line('月初来', ret.mtd, benchRet && benchRet.mtd),
       line('年初来', ret.ytd, benchRet && benchRet.ytd),
@@ -212,32 +205,6 @@ function renderAccountCards(series, benchRet, benchMeta, state) {
   }
   wrap.appendChild(grid);
   return wrap;
-}
-
-// Two family accounts at the same broker legitimately hold many of the same stocks, but an
-// EXACT match — same names, same quantities — means the same CSV was imported into both, which
-// is easy to do by accident and makes every figure on the two cards identical.
-function renderDuplicateWarning(ids, snapByBroker, brokerById) {
-  const signature = (snap) => JSON.stringify(snap.items.map((it) => [it.name, it.quantity]).sort());
-  const groups = new Map();
-  for (const id of ids) {
-    const snap = snapByBroker.get(id);
-    if (!snap || snap.items.length === 0) continue;
-    const key = signature(snap);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(id);
-  }
-  const clashes = [...groups.values()].filter((g) => g.length > 1);
-  if (clashes.length === 0) return document.createDocumentFragment();
-  return el('div', { class: 'card section-gap', style: 'border-color:var(--danger)' }, [
-    el('h2', {}, '⚠ 保有内容が完全に一致している口座があります'),
-    ...clashes.map((g) => el('p', { class: 'hint' },
-      `${g.map((id) => brokerById.get(id)?.name || '?').join(' と ')} は銘柄も数量も同じです。` +
-      `同じCSVを両方の口座に取り込んでいる可能性が高いため、成績もまったく同じ数字になります。`
-    )),
-    el('p', { class: 'hint' },
-      '「履歴」画面で各口座の「詳細」を開いて中身を見比べ、間違っている方を削除してから、正しいCSVを取り込み直してください。'),
-  ]);
 }
 
 function renderChartCard(series, bench, benchMeta, state) {

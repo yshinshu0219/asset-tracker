@@ -217,7 +217,26 @@ export function guessYahooTicker(code, currency) {
     if (currency === 'KRW') return trimmed.padStart(6, '0') + '.KS';
     if (currency === 'HKD') return trimmed.padStart(4, '0') + '.HK';
   }
+  // Tokyo has issued alphanumeric codes since 2024 (e.g. 285A, 130A). They are ordinary TSE
+  // listings, but the digits-only test above let them through without the .T suffix, so Yahoo
+  // answered 404 and the holding was silently frozen at its imported value.
+  if (isBareTokyoCode(trimmed) && (!currency || currency === 'JPY')) return trimmed + '.T';
   return trimmed;
+}
+
+// 投資信託 are registered as "FUND:<ISIN>:<協会コード>" and priced from the 投資信託協会's
+// daily 基準価額, which is quoted per 10,000 口 — so a fund's price has to be divided by that
+// unit before multiplying by the 口数 held. Stocks are priced per share.
+export function isFundCode(code) {
+  return String(code || '').toUpperCase().startsWith('FUND:');
+}
+
+export function unitsPerPrice(item, code) {
+  return isFundCode(code) ? 10000 : (item.unitDivisor || 1);
+}
+
+export function isBareTokyoCode(code) {
+  return /^\d{3}[A-Z]$/.test(String(code || '').trim().toUpperCase());
 }
 
 // Reduces a daily {date, close} series to one point per month (the last trading day seen

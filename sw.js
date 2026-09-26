@@ -1,7 +1,7 @@
 // Service worker: caches the app shell so the installed PWA can open even when the local
 // python server isn't running (after the first successful load). Bump CACHE_NAME whenever
 // app files change so clients pick up the new version.
-const CACHE_NAME = 'asset-tracker-v21';
+const CACHE_NAME = 'asset-tracker-v24';
 
 const APP_SHELL = [
   './',

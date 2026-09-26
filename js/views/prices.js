@@ -1,6 +1,6 @@
 import { DB } from '../db.js';
 import { el, showToast, formatMoney, formatNumber, formatTime, latestSnapshotPerBroker, toMonthlySeries } from '../util.js';
-import { fetchQuotes, fetchHistory, fetchFxRates, fetchDividendInfo, syncTickersToServer } from '../prices.js';
+import { fetchQuotes, fetchHistory, fetchFxRates, fetchDividendInfo, syncTickersToServer, searchFunds } from '../prices.js';
 import { isCloudMode } from '../api.js';
 
 let priceChart = null;
@@ -12,8 +12,9 @@ export function renderPrices(container, state, refresh) {
   container.appendChild(el('h1', {}, '株価（自動取得）'));
   container.appendChild(el('p', { class: 'hint section-gap' },
     (isCloudMode() ? 'クラウド経由で' : 'ローカルサーバー（起動.bat で起動したもの）経由で') +
-    'Yahoo Financeの現在値を取得します。非公式のデータ源のため、15〜20分程度遅延した値になることがあり、投資信託など銘柄コードが無いものは取得できません。' +
-    '証券コードの形式：日本株 7203.T ／ 米国株 AAPL ／ 韓国株 005930.KS（KOSDAQは .KQ）／ 香港株 0700.HK'
+    '株価はYahoo Financeから取得します（非公式のため15〜20分程度遅れることがあります）。' +
+    '投資信託は投資信託協会の公表する基準価額（1日1回・1万口あたり）を取得します。投資信託はファンド名から自動でコードを探しますが、見つからない場合は「🔍 投信を検索」から選んでください。' +
+    '証券コードの形式：日本株 7203.T ／ 米国株 AAPL ／ 韓国株 005930.KS（KOSDAQは .KQ）／ 香港株 0700.HK ／ 投資信託 FUND:ISINコード:協会コード'
   ));
 
   const latest = latestSnapshotPerBroker(state.snapshots);
@@ -127,9 +128,37 @@ function renderTickerRow(r, state, refresh) {
   const priceCell = el('td', { class: 'num' }, live && !live.error ? formatMoney(live.price, live.currency) : (r.code ? '-' : ''));
   const timeCell = el('td', {}, live && !live.error ? formatTime(live.asOf) : (live && live.error ? el('span', { class: 'hint' }, '取得失敗') : ''));
 
+  // Manual fallback for a fund the automatic name match couldn't pin down: list the library's
+  // candidates and let the user pick one into the code box (then 保存 as usual).
+  const fundPicker = el('div', {});
+  const searchBtn = r.code ? null : el('button', {
+    class: 'btn btn-sm',
+    style: 'margin-top:4px',
+    onclick: async () => {
+      searchBtn.disabled = true;
+      fundPicker.textContent = '検索中…';
+      const base = String(r.name).normalize('NFKC');
+      let results = null;
+      for (const q of [base, base.replace(/\s*\([^()]*\)\s*$/, ''), base.replace(/\s*\(.*$/, '')]) {
+        results = await searchFunds(q.trim());
+        if (results == null || results.length) break;
+      }
+      searchBtn.disabled = false;
+      fundPicker.textContent = '';
+      if (results == null) { fundPicker.textContent = '検索できませんでした（サーバー／クラウドの更新が必要な場合があります）'; return; }
+      if (!results.length) { fundPicker.textContent = '該当する投資信託が見つかりませんでした'; return; }
+      const select = el('select', { style: 'max-width:260px' }, [
+        el('option', { value: '' }, `候補 ${results.length}件から選択`),
+        ...results.map((f) => el('option', { value: f.code }, `${f.name}${f.nav ? `（基準価額 ${formatNumber(f.nav, 0)}円）` : ''}`)),
+      ]);
+      select.addEventListener('change', () => { if (select.value) codeInput.value = select.value; });
+      fundPicker.appendChild(select);
+    },
+  }, '🔍 投信を検索');
+
   return el('tr', {}, [
     el('td', {}, r.name),
-    el('td', {}, codeInput),
+    el('td', {}, [codeInput, searchBtn, fundPicker]),
     priceCell,
     timeCell,
     el('td', {}, el('button', {
@@ -137,6 +166,7 @@ function renderTickerRow(r, state, refresh) {
       onclick: async () => {
         const code = codeInput.value.trim().toUpperCase();
         if (!code) { await DB.deleteTicker(r.name); } else { await DB.saveTicker({ name: r.name, code }); }
+        state.dailySeries = null;  // 成績 refetches with the new code
         const all = await DB.getAllTickers();
         await syncTickersToServer(all);
         showToast('保存しました');

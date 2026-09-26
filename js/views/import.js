@@ -1,7 +1,7 @@
 import { DB, uid } from '../db.js';
 import { readCsvFileAsText, parseCsvRaw, guessHeaderRow, parseNumber, parseDateToISO } from '../csv.js';
 import { el, showToast, todayStr, formatJPY, formatMoney, formatNumber, guessYahooTicker } from '../util.js';
-import { ensureTickersRegistered, fetchFxRates } from '../prices.js';
+import { ensureTickersRegistered, fetchFxRates, registerFundTickers } from '../prices.js';
 import { detectSections, detectionIsComplete, describeSection, isSummaryRow, splitNameAndCode } from '../autoMap.js';
 
 const FIELD_LABELS_BY_KIND = {
@@ -562,6 +562,11 @@ function renderStep5Holdings(body, state, refresh) {
         showToast('取り込みました');
         wiz = freshWizard(wiz.kind);
         await refresh();
+        // 投資信託 have no code in the CSV; look theirs up by name in the background so the
+        // save itself stays instant
+        registerFundTickers(normalizedItems)
+          .then((n) => { if (n) { showToast(`投資信託 ${n}件の基準価額を取得できるようにしました`); refresh(); } })
+          .catch(() => {});
       },
     }, '保存する'),
   ]));

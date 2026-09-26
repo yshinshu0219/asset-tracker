@@ -1,4 +1,4 @@
-import { formatJPY, formatNumber, formatMoney, formatTime, buildNetWorthTimeline, latestSnapshotPerBroker, costInJPY, el } from '../util.js';
+import { formatJPY, formatNumber, formatMoney, formatTime, buildNetWorthTimeline, latestSnapshotPerBroker, costInJPY, el, unitsPerPrice } from '../util.js';
 
 let lineChart = null;
 let donutChart = null;
@@ -89,7 +89,7 @@ export function renderDashboard(container, { brokers, snapshots, tickers = [], l
       const rate = q && !q.error ? (q.currency === 'JPY' ? 1 : fxRates[q.currency] ?? null) : null;
       const usableForTotal = q && !q.error && q.price != null && rate != null && item.quantity != null && !Number.isNaN(item.quantity);
       if (usableForTotal) {
-        liveTotal += q.price * rate * item.quantity;
+        liveTotal += (q.price * rate * item.quantity) / unitsPerPrice(item, code);
         liveCount++;
         if (!latestAsOf || (q.asOf && q.asOf > latestAsOf)) latestAsOf = q.asOf;
       } else {
